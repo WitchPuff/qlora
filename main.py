@@ -85,11 +85,11 @@ class EfficientEvalCallback(TrainerCallback):
 
 
 def get_dataset(dataset, model_name="roberta-base"):
+    tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
 
     def tok(ex): 
         return tokenizer(ex["sentence"], truncation=True, padding="max_length", max_length=128)
     
-    tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
     dataset = dataset.map(tok, batched=True)
     dataset = dataset.rename_column("label", "labels")
     dataset = dataset.with_format("torch", columns=["input_ids", "attention_mask", "labels"])
