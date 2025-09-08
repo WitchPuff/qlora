@@ -102,12 +102,18 @@ def get_dataset(dataset, model_name="roberta-base"):
 
 def load_backbone(model_name="roberta-base", precision="fp16"):
     print(f"Loading {model_name} with {precision} precision")
+
     if precision == "fp16":
         return AutoModelForSequenceClassification.from_pretrained(
             model_name, num_labels=2, device_map="auto")
     elif precision == "int8":
+        bnb_config = BitsAndBytesConfig(
+            load_in_8bit=True,              # 8bit 量化
+            llm_int8_has_fp16_weight=False,  # 默认
+            llm_int8_skip_modules=["classifier", "pre_classifier"]
+        )
         return AutoModelForSequenceClassification.from_pretrained(
-            model_name, num_labels=2, load_in_8bit=True, device_map="auto")
+            model_name, num_labels=2, quantization_config=bnb_config, device_map="auto")
     elif precision in ["nf4", "fp4"]:
         qtype = "nf4" if precision=="nf4" else "fp4"
         bnb_cfg = BitsAndBytesConfig(
@@ -237,14 +243,15 @@ if __name__ == '__main__':
     if not args.eval:
         model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2)
         output_dir = train(model, dataset, r=args.r, lora_alpha=args.lora_alpha,
-                           target_modules=args.target_modules, epochs=args.epochs, batch_size=args.batch_size,
-                           learning_rate=args.learning_rate, weight_decay=args.weight_decay)
+                        target_modules=args.target_modules, epochs=args.epochs, batch_size=args.batch_size,
+                        learning_rate=args.learning_rate, weight_decay=args.weight_decay)
     elif os.path.exists(args.ckpt):
         output_dir = args.ckpt
-        wandb.init(project="qlora", name=output_dir, config=args)
+        wandb.init(project="qlora", name=output_dir.split("/")[-1]+"_eval", config=args)
     else:
         raise ValueError("Please provide a checkpoint directory for evaluation only mode.")
     try:
+        print(f"Loading checkpoints from {output_dir}")
         for precision in ["fp16", "int8", "nf4", "fp4"]:
             print("Testing precision:", precision)
             model = load_backbone(model_name=args.model_name, precision=precision)
