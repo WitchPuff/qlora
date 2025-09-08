@@ -294,7 +294,9 @@ if __name__ == '__main__':
         for precision in ["nf4", "fp4", "int8", "fp16"]:
             print("Testing precision:", precision)
             model = load_backbone(num_labels=num_labels, model_name=args.model_name, precision=precision)
+            print("Loaded backbone model.")
             model = PeftModel.from_pretrained(model, output_dir, is_trainable=False)
+            print("Loaded LoRA weights from", output_dir)
             eval(model, dataset, precision=precision, batch_size=args.batch_size, output_dir=output_dir)
     except Exception as e:
         print("Error occurred during evaluation:", e)
