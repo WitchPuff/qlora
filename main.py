@@ -64,24 +64,30 @@ class EfficientEvalCallback(TrainerCallback):
         self.eval_start_time = None
 
     def on_evaluate(self, args, state, control, **kwargs):
+        import time, torch
         self.eval_start_time = time.time()
         torch.cuda.reset_peak_memory_stats()
 
-    def on_evaluate_end(self, args, state, control, **kwargs):
+    def on_evaluate_end(self, args, state, control, metrics=None, **kwargs):
         eval_time = time.time() - self.eval_start_time
+        max_mem = torch.cuda.max_memory_allocated() / (1024 ** 3)
+
+        model = kwargs.get("model", None)
+        total_params = sum(p.numel() for p in model.parameters()) if model else -1
+
         print(f"[{self.name}] Eval time: {eval_time:.2f} sec")
-        
-        max_mem = torch.cuda.max_memory_allocated() / (1024**3)
         print(f"[{self.name}] Max VRAM used: {max_mem:.2f} GB")
-        
-        total_params = sum(p.numel() for p in model.parameters())
         print(f"[{self.name}] Total parameters: {total_params}")
 
-        wandb.log({
+        log_data = {
             f"{self.name}/eval_time_sec": eval_time,
             f"{self.name}/max_vram_gb": max_mem,
-            f"{self.name}/total_params": total_params
-        })
+            f"{self.name}/total_params": total_params,
+        }
+        if metrics:
+            log_data.update({f"{self.name}/{k}": v for k, v in metrics.items()})
+
+        wandb.log(log_data, step=state.global_step)
 
 
 def get_dataset(dataset, model_name="roberta-base"):
@@ -138,7 +144,7 @@ def compute_metrics(logits):
 
 
 def train(model, dataset, r=8, lora_alpha=16, target_modules=["query", "value"],
-          learning_rate=1e-3, epochs=25, batch_size=256, weight_decay=1e-2):
+        learning_rate=1e-3, epochs=25, batch_size=256, weight_decay=1e-2):
     
 
     
@@ -186,7 +192,7 @@ def train(model, dataset, r=8, lora_alpha=16, target_modules=["query", "value"],
 
     trainer.train()
     metrics = trainer.evaluate(eval_dataset=dataset["validation"], 
-                               metric_key_prefix="inference")
+                            metric_key_prefix="inference")
     wandb.log(metrics)
     print(metrics)
     output_dir = os.path.join('ckpt', output_dir)
@@ -201,8 +207,8 @@ def eval(model, dataset, precision, batch_size=256, output_dir='ckpt'):
     args = TrainingArguments(
         output_dir=os.path.join(output_dir, f"{precision}_eval"),
         per_device_eval_batch_size=int(batch_size*2),
-        eval_strategy="epoch", logging_steps=50, 
-        bf16=False, fp16=False, report_to="wandb",
+        eval_strategy="no", logging_steps=50, 
+        bf16=False, fp16=False, report_to="none",
     )
 
 
@@ -214,6 +220,9 @@ def eval(model, dataset, precision, batch_size=256, output_dir='ckpt'):
         callbacks=[EfficientEvalCallback(name=precision+"_eval")]
     )
     with torch.no_grad():
+        # Int8 Issue: Error occurred during evaluation: 'MatmulLtState' object has no attribute 'memory_efficient_backward'
+        # Solution: pip install bitsandbytes==0.44.0 accelerate==1.0.1 peft==0.13.0 transformers==4.46.3
+        # reference: https://github.com/tloen/alpaca-lora/issues/271
         metrics = trainer.evaluate(metric_key_prefix=precision+"_eval")
     print(metrics)
     wandb.log(metrics)
@@ -252,7 +261,7 @@ if __name__ == '__main__':
         raise ValueError("Please provide a checkpoint directory for evaluation only mode.")
     try:
         print(f"Loading checkpoints from {output_dir}")
-        for precision in ["fp16", "int8", "nf4", "fp4"]:
+        for precision in ["nf4", "fp4", "int8", "fp16"]:
             print("Testing precision:", precision)
             model = load_backbone(model_name=args.model_name, precision=precision)
             model = PeftModel.from_pretrained(model, output_dir, is_trainable=False)
