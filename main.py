@@ -242,6 +242,7 @@ if __name__ == '__main__':
                            learning_rate=args.learning_rate, weight_decay=args.weight_decay)
     elif os.path.exists(args.ckpt):
         output_dir = args.ckpt
+        wandb.init(project="qlora", name=output_dir, config=args)
     else:
         raise ValueError("Please provide a checkpoint directory for evaluation only mode.")
     try:
