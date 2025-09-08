@@ -205,11 +205,10 @@ def eval(model, dataset, precision, batch_size=256, output_dir='ckpt'):
         args=args,
         eval_dataset=dataset["validation"],
         compute_metrics=compute_metrics,
-        callbacks=[EfficientEvalCallback(name=precision+"_eval")],
-        metrics_key_prefix=precision+"_eval"
+        callbacks=[EfficientEvalCallback(name=precision+"_eval")]
     )
 
-    metrics = trainer.evaluate()
+    metrics = trainer.evaluate(metric_key_prefix=precision+"_eval")
     print(metrics)
     wandb.log(metrics)
     
