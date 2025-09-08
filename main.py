@@ -58,38 +58,48 @@ class EfficientMetricsCallback(TrainerCallback):
 
 
 
+
 class EfficientEvalCallback(TrainerCallback):
     def __init__(self, name="eval"):
         self.name = name
         self.eval_start_time = None
+        self._armed = False
 
-    def on_evaluate(self, args, state, control, **kwargs):
-        import time, torch
-        self.eval_start_time = time.time()
-        torch.cuda.reset_peak_memory_stats()
 
-    def on_evaluate_end(self, args, state, control, metrics=None, **kwargs):
+    def on_prediction_step(self, args, state, control, **kwargs):
+        if not self._armed:
+            self._armed = True
+            self.eval_start_time = time.time()
+            if torch.cuda.is_available():
+                torch.cuda.reset_peak_memory_stats()
+
+    def on_evaluate(self, args, state, control, metrics=None, **kwargs):
         eval_time = time.time() - self.eval_start_time
+
         max_mem = torch.cuda.max_memory_allocated() / (1024 ** 3)
 
         model = kwargs.get("model", None)
-        total_params = sum(p.numel() for p in model.parameters()) if model else -1
+        total_params = sum(p.numel() for p in model.parameters()) if model is not None else None
 
+        print(f"Evaluation ended for {self.name}.")
         print(f"[{self.name}] Eval time: {eval_time:.2f} sec")
         print(f"[{self.name}] Max VRAM used: {max_mem:.2f} GB")
         print(f"[{self.name}] Total parameters: {total_params}")
 
-        log_data = {
-            f"{self.name}/eval_time_sec": eval_time,
-            f"{self.name}/max_vram_gb": max_mem,
-            f"{self.name}/total_params": total_params,
-        }
+        log_data = {}
+        log_data[f"{self.name}/eval_time_sec"] = eval_time
+        log_data[f"{self.name}/max_vram_gb"] = max_mem
+        log_data[f"{self.name}/total_params"] = total_params
         if metrics:
             log_data.update({f"{self.name}/{k}": v for k, v in metrics.items()})
 
-        wandb.log(log_data, step=state.global_step)
+        if log_data:
+            wandb.log(log_data, step=state.global_step)
 
-
+        self.eval_start_time = None
+        self._armed = False
+        
+        
 def get_dataset(dataset, model_name="roberta-base"):
     tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
 
@@ -114,8 +124,8 @@ def load_backbone(model_name="roberta-base", precision="fp16"):
             model_name, num_labels=2, device_map="auto")
     elif precision == "int8":
         bnb_config = BitsAndBytesConfig(
-            load_in_8bit=True,              # 8bit 量化
-            llm_int8_has_fp16_weight=False,  # 默认
+            load_in_8bit=True,
+            llm_int8_has_fp16_weight=False,
             llm_int8_skip_modules=["classifier", "pre_classifier"]
         )
         return AutoModelForSequenceClassification.from_pretrained(
