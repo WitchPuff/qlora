@@ -90,7 +90,7 @@ class EfficientEvalCallback(TrainerCallback):
         log_data[f"{self.name}/max_vram_gb"] = max_mem
         log_data[f"{self.name}/total_params"] = total_params
         log_data.update({f"{self.name}/{k}": v for k, v in metrics.items()})
-        wandb.log(log_data, step=state.global_step)
+        wandb.log(log_data)
         print(log_data)
         self.eval_start_time = None
         self._armed = False
@@ -198,7 +198,7 @@ def train(model, dataset, r=8, lora_alpha=16, target_modules=["query", "value"],
 
     trainer.train()
     trainer.evaluate(eval_dataset=dataset["validation"], 
-                            metric_key_prefix="inference")
+                        metric_key_prefix="inference")
     output_dir = os.path.join('ckpt', output_dir)
     os.makedirs(output_dir, exist_ok=True)
     trainer.save_model(output_dir)
@@ -227,9 +227,7 @@ def eval(model, dataset, precision, batch_size=256, output_dir='ckpt'):
         # Int8 Issue: Error occurred during evaluation: 'MatmulLtState' object has no attribute 'memory_efficient_backward'
         # Solution: pip install bitsandbytes==0.44.0 accelerate==1.0.1 peft==0.13.0 transformers==4.46.3
         # reference: https://github.com/tloen/alpaca-lora/issues/271
-        metrics = trainer.evaluate(metric_key_prefix=precision+"_eval")
-    print(metrics)
-    wandb.log(metrics)
+        trainer.evaluate()
     
     
 def parse_args():
