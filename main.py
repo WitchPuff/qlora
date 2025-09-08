@@ -65,7 +65,6 @@ class EfficientEvalCallback(TrainerCallback):
         self.eval_start_time = None
         self._armed = False
 
-
     def on_prediction_step(self, args, state, control, **kwargs):
         if not self._armed:
             self._armed = True
@@ -90,12 +89,9 @@ class EfficientEvalCallback(TrainerCallback):
         log_data[f"{self.name}/eval_time_sec"] = eval_time
         log_data[f"{self.name}/max_vram_gb"] = max_mem
         log_data[f"{self.name}/total_params"] = total_params
-        if metrics:
-            log_data.update({f"{self.name}/{k}": v for k, v in metrics.items()})
-
-        if log_data:
-            wandb.log(log_data, step=state.global_step)
-
+        log_data.update({f"{self.name}/{k}": v for k, v in metrics.items()})
+        wandb.log(log_data, step=state.global_step)
+        print(log_data)
         self.eval_start_time = None
         self._armed = False
         
@@ -201,10 +197,8 @@ def train(model, dataset, r=8, lora_alpha=16, target_modules=["query", "value"],
     )
 
     trainer.train()
-    metrics = trainer.evaluate(eval_dataset=dataset["validation"], 
+    trainer.evaluate(eval_dataset=dataset["validation"], 
                             metric_key_prefix="inference")
-    wandb.log(metrics)
-    print(metrics)
     output_dir = os.path.join('ckpt', output_dir)
     os.makedirs(output_dir, exist_ok=True)
     trainer.save_model(output_dir)
