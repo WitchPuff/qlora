@@ -186,12 +186,14 @@ def train(model, dataset, r=8, lora_alpha=16, target_modules=["query", "value"],
     output_dir = os.path.join('ckpt', output_dir)
     os.makedirs(output_dir, exist_ok=True)
     trainer.save_model(output_dir)
+    print(f"Model saved to {output_dir}")
     return output_dir
 
-def eval(model, dataset, precision, batch_size=256):
+def eval(model, dataset, precision, batch_size=256, output_dir='ckpt'):
     model.eval()
 
     args = TrainingArguments(
+        output_dir=os.path.join(output_dir, f"{precision}_eval"),
         per_device_eval_batch_size=int(batch_size*2),
         eval_strategy="epoch", logging_steps=50, 
         bf16=True, fp16=False, report_to="wandb",
@@ -223,6 +225,8 @@ def parse_args():
     parser.add_argument("--epochs", type=int, default=25)
     parser.add_argument("--batch_size", type=int, default=256)
     parser.add_argument("--weight_decay", type=float, default=1e-2)
+    parser.add_argument("--ckpt", type=str, default="")
+    parser.add_argument("--eval", action="store_true", help="Run evaluation only")
     args = parser.parse_args()
     return args
 
@@ -231,15 +235,20 @@ if __name__ == '__main__':
     model_name = args.model_name
     dataset = load_dataset("glue", "sst2")
     dataset = get_dataset(dataset, model_name)
-
-    model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2)
-    output_dir = train(model, dataset, r=args.r, lora_alpha=args.lora_alpha, 
-        target_modules=args.target_modules, epochs=args.epochs, batch_size=args.batch_size, 
-        learning_rate=args.learning_rate, weight_decay=args.weight_decay)
-    for precision in ["fp16", "int8", "nf4", "fp4"]:
-        print("Testing precision:", precision)
-        model = load_backbone(model_name=args.model_name, precision=precision)
-        model = PeftModel.from_pretrained(model, output_dir, is_trainable=False)
-        eval(model, dataset, precision=precision, batch_size=args.batch_size)
-
-
+    if not args.eval:
+        model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2)
+        output_dir = train(model, dataset, r=args.r, lora_alpha=args.lora_alpha,
+                           target_modules=args.target_modules, epochs=args.epochs, batch_size=args.batch_size,
+                           learning_rate=args.learning_rate, weight_decay=args.weight_decay)
+    elif os.path.exists(args.ckpt):
+        output_dir = args.ckpt
+    else:
+        raise ValueError("Please provide a checkpoint directory for evaluation only mode.")
+    try:
+        for precision in ["fp16", "int8", "nf4", "fp4"]:
+            print("Testing precision:", precision)
+            model = load_backbone(model_name=args.model_name, precision=precision)
+            model = PeftModel.from_pretrained(model, output_dir, is_trainable=False)
+            eval(model, dataset, precision=precision, batch_size=args.batch_size, output_dir=output_dir)
+    except Exception as e:
+        print("Error occurred during evaluation:", e)
