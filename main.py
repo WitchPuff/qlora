@@ -96,28 +96,44 @@ class EfficientEvalCallback(TrainerCallback):
         self._armed = False
         
         
-def get_dataset(dataset, model_name="roberta-base"):
+
+def get_dataset(name, model_name="roberta-base"):
     tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
 
-    def tok(ex): 
-        return tokenizer(ex["sentence"], truncation=True, padding="max_length", max_length=128)
-    
-    dataset = dataset.map(tok, batched=True)
-    dataset = dataset.rename_column("label", "labels")
-    dataset = dataset.with_format("torch", columns=["input_ids", "attention_mask", "labels"])
-    
-    print(dataset.keys())
-    print('Train set:', len(dataset['train']))
-    print('Validation set:', len(dataset['validation']))
-    print('Sample:', dataset['train'][0])
-    return dataset
+    if name == "sst2":
+        raw = load_dataset("glue", "sst2")
+        text_col, label_col = "sentence", "label"
+        split_map = {"validation": "validation"}
+        num_label = 2
+    elif name == "trec":
+        raw = load_dataset("trec")
+        text_col, label_col = "text", "coarse_label"
+        split_map = {"validation": "test"}
+        num_label = 6
+    else:
+        raise ValueError(f"Unknown dataset: {name}")
 
-def load_backbone(model_name="roberta-base", precision="fp16"):
+    def tok(batch):
+        return tokenizer(batch[text_col], truncation=True, padding="max_length", max_length=128)
+
+    dataset = raw.map(tok, batched=True)
+    dataset = dataset.rename_column(label_col, "labels")
+
+    dataset = dataset.with_format("torch", columns=["input_ids", "attention_mask", "labels"])
+
+    print(dataset)
+    print("Train set:", len(dataset["train"]))
+    print("Validation set:", len(dataset[split_map["validation"]]))
+    print("Sample:", dataset["train"][0])
+
+    return dataset, num_label
+
+def load_backbone(num_labels, model_name="roberta-base", precision="fp16"):
     print(f"Loading {model_name} with {precision} precision")
 
     if precision == "fp16":
         return AutoModelForSequenceClassification.from_pretrained(
-            model_name, num_labels=2, device_map="auto")
+            model_name, num_labels=num_labels, device_map="auto")
     elif precision == "int8":
         bnb_config = BitsAndBytesConfig(
             load_in_8bit=True,
@@ -125,7 +141,7 @@ def load_backbone(model_name="roberta-base", precision="fp16"):
             llm_int8_skip_modules=["classifier", "pre_classifier"]
         )
         return AutoModelForSequenceClassification.from_pretrained(
-            model_name, num_labels=2, quantization_config=bnb_config, device_map="auto")
+            model_name, num_labels=num_labels, quantization_config=bnb_config, device_map="auto")
     elif precision in ["nf4", "fp4"]:
         qtype = "nf4" if precision=="nf4" else "fp4"
         bnb_cfg = BitsAndBytesConfig(
@@ -137,14 +153,26 @@ def load_backbone(model_name="roberta-base", precision="fp16"):
             llm_int8_skip_modules=["classifier", "pre_classifier"] 
         )
         return AutoModelForSequenceClassification.from_pretrained(
-            model_name, num_labels=2, quantization_config=bnb_cfg, device_map="auto")
+            model_name, num_labels=num_labels, quantization_config=bnb_cfg, device_map="auto")
     else:
         raise ValueError
 
 
-def compute_metrics(logits):
-    acc = evaluate.load("accuracy")
-    return acc.compute(predictions=logits.predictions.argmax(-1), references=logits.label_ids)
+
+
+def compute_metrics(pred):
+    accuracy = evaluate.load("accuracy")
+    f1 = evaluate.load("f1")
+    preds = pred.predictions.argmax(-1)
+    labels = pred.label_ids
+    acc = accuracy.compute(predictions=preds, references=labels)
+    f1_macro = f1.compute(predictions=preds, references=labels, average="macro")
+    f1_micro = f1.compute(predictions=preds, references=labels, average="micro")
+    return {
+        "accuracy": acc["accuracy"],
+        "f1_macro": f1_macro["f1"],
+        "f1_micro": f1_micro["f1"],
+    }
 
 
 
@@ -234,6 +262,7 @@ def parse_args():
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name", type=str, default="roberta-base")
+    parser.add_argument("--dataset", type=str, default="sst2")
     parser.add_argument("--r", type=int, default=8)
     parser.add_argument("--lora_alpha", type=int, default=16)
     parser.add_argument("--target_modules", type=str, nargs='+', default=["query", "value"])
@@ -249,10 +278,9 @@ def parse_args():
 if __name__ == '__main__':
     args = parse_args()
     model_name = args.model_name
-    dataset = load_dataset("glue", "sst2")
-    dataset = get_dataset(dataset, model_name)
+    dataset, num_labels = get_dataset(args.dataset, model_name)
     if not args.eval:
-        model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2)
+        model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=num_labels)
         output_dir = train(model, dataset, r=args.r, lora_alpha=args.lora_alpha,
                         target_modules=args.target_modules, epochs=args.epochs, batch_size=args.batch_size,
                         learning_rate=args.learning_rate, weight_decay=args.weight_decay)
@@ -265,7 +293,7 @@ if __name__ == '__main__':
         print(f"Loading checkpoints from {output_dir}")
         for precision in ["nf4", "fp4", "int8", "fp16"]:
             print("Testing precision:", precision)
-            model = load_backbone(model_name=args.model_name, precision=precision)
+            model = load_backbone(num_labels=num_labels, model_name=args.model_name, precision=precision)
             model = PeftModel.from_pretrained(model, output_dir, is_trainable=False)
             eval(model, dataset, precision=precision, batch_size=args.batch_size, output_dir=output_dir)
     except Exception as e:
