@@ -202,7 +202,7 @@ def eval(model, dataset, precision, batch_size=256, output_dir='ckpt'):
         output_dir=os.path.join(output_dir, f"{precision}_eval"),
         per_device_eval_batch_size=int(batch_size*2),
         eval_strategy="epoch", logging_steps=50, 
-        bf16=True, fp16=False, report_to="wandb",
+        bf16=False, fp16=False, report_to="wandb",
     )
 
 
@@ -213,8 +213,8 @@ def eval(model, dataset, precision, batch_size=256, output_dir='ckpt'):
         compute_metrics=compute_metrics,
         callbacks=[EfficientEvalCallback(name=precision+"_eval")]
     )
-
-    metrics = trainer.evaluate(metric_key_prefix=precision+"_eval")
+    with torch.no_grad():
+        metrics = trainer.evaluate(metric_key_prefix=precision+"_eval")
     print(metrics)
     wandb.log(metrics)
     
