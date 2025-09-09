@@ -267,9 +267,8 @@ if __name__ == '__main__':
     args = parse_args()
     model_name = args.model_name
     dataset, num_labels = get_dataset(args.dataset, model_name)
-
     if not args.eval:
-        output_dir = "_".join([f"{k}_{v if k != 'target_modules' else '_'.join(v)}" for k, v in args.items()])
+        output_dir = "_".join([f"{k}_{v if k != 'target_modules' else '_'.join(v)}" for k, v in vars(args).items()])
         output_dir += f"_{int(time.time())}"
         wandb.init(project="qlora", name=output_dir, config=args)
         model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=num_labels)
