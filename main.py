@@ -103,12 +103,13 @@ def get_dataset(name, model_name="roberta-base"):
     if name == "sst2":
         raw = load_dataset("glue", "sst2")
         text_col, label_col = "sentence", "label"
-        split_map = {"validation": "validation"}
         num_label = 2
     elif name == "trec":
         raw = load_dataset("trec")
         text_col, label_col = "text", "coarse_label"
-        split_map = {"validation": "test"}
+        if "validation" not in raw:
+            raw = raw.copy()
+            raw["validation"] = raw["test"]
         num_label = 6
     else:
         raise ValueError(f"Unknown dataset: {name}")
@@ -120,10 +121,10 @@ def get_dataset(name, model_name="roberta-base"):
     dataset = dataset.rename_column(label_col, "labels")
 
     dataset = dataset.with_format("torch", columns=["input_ids", "attention_mask", "labels"])
-
+    
     print(dataset)
     print("Train set:", len(dataset["train"]))
-    print("Validation set:", len(dataset[split_map["validation"]]))
+    print("Validation set:", len(dataset["validation"]))
     print("Sample:", dataset["train"][0])
 
     return dataset, num_label
