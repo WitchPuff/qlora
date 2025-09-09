@@ -107,9 +107,7 @@ def get_dataset(name, model_name="roberta-base"):
     elif name == "trec":
         raw = load_dataset("trec")
         text_col, label_col = "text", "coarse_label"
-        if "validation" not in raw:
-            raw = raw.copy()
-            raw["validation"] = raw["test"]
+
         num_label = 6
     else:
         raise ValueError(f"Unknown dataset: {name}")
@@ -121,7 +119,9 @@ def get_dataset(name, model_name="roberta-base"):
     dataset = dataset.rename_column(label_col, "labels")
 
     dataset = dataset.with_format("torch", columns=["input_ids", "attention_mask", "labels"])
-    
+    if "validation" not in dataset:
+        dataset = dataset.copy()
+        dataset["validation"] = dataset["test"]
     print(dataset)
     print("Train set:", len(dataset["train"]))
     print("Validation set:", len(dataset["validation"]))
