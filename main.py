@@ -177,23 +177,11 @@ def compute_metrics(pred):
 
 
 
-def train(model, dataset, r=8, lora_alpha=16, target_modules=["query", "value"],
+def train(model, dataset, output_dir, r=8, lora_alpha=16, target_modules=["query", "value"],
         learning_rate=1e-3, epochs=25, batch_size=256, weight_decay=1e-2):
     
 
-    
-    config = {
-        "target_modules": target_modules,
-        "r": r,
-        "alpha": lora_alpha,
-        "lr": learning_rate,
-        "epochs": epochs,
-        "batch_size": batch_size,
-        "weight_decay": weight_decay
-    }
-    output_dir = "_".join([f"{k}_{v if k != 'target_modules' else '_'.join(v)}" for k, v in config.items()])
-    output_dir += f"_{int(time.time())}"
-    wandb.init(project="qlora", name=output_dir, config=config)
+
 
     peft_cfg = LoraConfig(
         r=r, lora_alpha=lora_alpha, lora_dropout=0.05,
@@ -279,9 +267,13 @@ if __name__ == '__main__':
     args = parse_args()
     model_name = args.model_name
     dataset, num_labels = get_dataset(args.dataset, model_name)
+
     if not args.eval:
+        output_dir = "_".join([f"{k}_{v if k != 'target_modules' else '_'.join(v)}" for k, v in args.items()])
+        output_dir += f"_{int(time.time())}"
+        wandb.init(project="qlora", name=output_dir, config=args)
         model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=num_labels)
-        output_dir = train(model, dataset, r=args.r, lora_alpha=args.lora_alpha,
+        output_dir = train(model, dataset, output_dir, r=args.r, lora_alpha=args.lora_alpha,
                         target_modules=args.target_modules, epochs=args.epochs, batch_size=args.batch_size,
                         learning_rate=args.learning_rate, weight_decay=args.weight_decay)
     elif os.path.exists(args.ckpt):
